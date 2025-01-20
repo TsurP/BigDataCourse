@@ -38,7 +38,7 @@ public class HW2StudentAnswer implements HW2API {
     private static final String TABLE_REVIEWS_BY_ID   = "reviews_by_id";
     private static final String TABLE_REVIEWS_BY_ITEM = "reviews_by_item";
 
-    // CREATE TABLE statements:
+    // CREATE TABLE statements
     
     private static final String CQL_CREATE_TABLES =
         "CREATE TABLE IF NOT EXISTS " + TABLE_ITEMS + " ("
@@ -76,6 +76,7 @@ public class HW2StudentAnswer implements HW2API {
     // CQL Statements
     // -------------------------------------------------------------------------------------
 
+    // Batch insert into both review tables:
     private static final String CQL_REVIEW_INSERT_BATCH =
         "BEGIN BATCH "
       + "INSERT INTO " + TABLE_REVIEWS_BY_ID
@@ -86,6 +87,7 @@ public class HW2StudentAnswer implements HW2API {
       + "VALUES (?, ?, ?, ?, ?, ?, ?); "
       + "APPLY BATCH";
 
+    // Single insert statement for items:
     private static final String CQL_ITEM_INSERT =
         "INSERT INTO " + TABLE_ITEMS
       + "(asin, title, imageUrl, categories, description) "
@@ -94,6 +96,7 @@ public class HW2StudentAnswer implements HW2API {
     // -------------------------------------------------------------------------------------
     // Select statements:
     // -------------------------------------------------------------------------------------
+    
     private static final String CQL_ITEM_SELECT =
         "SELECT * FROM " + TABLE_ITEMS + " WHERE asin = ?";
 
@@ -106,6 +109,7 @@ public class HW2StudentAnswer implements HW2API {
     // -------------------------------------------------------------------------------------
     // Fields
     // -------------------------------------------------------------------------------------
+    
     private CqlSession session;
 
     private PreparedStatement pstmtAddItem;
@@ -171,9 +175,9 @@ public class HW2StudentAnswer implements HW2API {
         System.out.println("Prepared Statements have been initialized!");
     }
 
-    /**
-     * Load items from a file where each line is a single JSON object (using single quotes).
-     */
+    // ----------------------------------------------------------------------
+    // loadItems - one JSON object per line
+    // ----------------------------------------------------------------------
     @Override
     public void loadItems(String pathItemsFile) throws Exception {
         System.out.println("Loading items from file (one JSON object per line): " + pathItemsFile);
@@ -188,7 +192,6 @@ public class HW2StudentAnswer implements HW2API {
         try (BufferedReader br = Files.newBufferedReader(Paths.get(pathItemsFile))) {
             String line;
             while ((line = br.readLine()) != null) {
-                // create a final (or effectively final) variable
                 final String currentLine = line.trim();
                 if (currentLine.isEmpty()) {
                     continue;
@@ -196,25 +199,28 @@ public class HW2StudentAnswer implements HW2API {
 
                 executor.submit(() -> {
                     try {
-                        // Parse as a Map
                         Map<String, Object> itemMap = mapper.readValue(
                             currentLine,
                             new TypeReference<Map<String, Object>>() {}
                         );
 
-                        // Extract fields
+                        // Extract fields or use 'na' if missing
                         String asin        = getStringValue(itemMap, "asin",        NOT_AVAILABLE_VALUE);
                         String title       = getStringValue(itemMap, "title",       NOT_AVAILABLE_VALUE);
+
+                        // The JSON might have "imageURL" or "imUrl"
                         String imageUrl    = getStringValue(itemMap, "imageURL",    NOT_AVAILABLE_VALUE);
                         if (NOT_AVAILABLE_VALUE.equals(imageUrl)) {
                             imageUrl = getStringValue(itemMap, "imUrl", NOT_AVAILABLE_VALUE);
                         }
+
                         String description = getStringValue(itemMap, "description", NOT_AVAILABLE_VALUE);
 
-                        // Build categories set
+                        // Build categories
                         Set<String> categories = new HashSet<>();
                         Object catObj = itemMap.get("categories");
                         if (catObj instanceof List) {
+                            // sometimes categories is an array of arrays
                             for (Object sub : (List<?>) catObj) {
                                 if (sub instanceof List) {
                                     for (Object c : (List<?>) sub) {
@@ -238,7 +244,7 @@ public class HW2StudentAnswer implements HW2API {
                         count.incrementAndGet();
 
                     } catch (Exception e) {
-                        System.err.println("Error parsing or inserting line: " + currentLine);
+                        System.err.println("Error parsing or inserting line (items): " + currentLine);
                         e.printStackTrace();
                     }
                 });
@@ -251,9 +257,9 @@ public class HW2StudentAnswer implements HW2API {
         System.out.println("Successfully loaded " + count.get() + " items into Cassandra.");
     }
 
-    /**
-     * Load reviews from a file where each line is a single JSON object (possibly using single quotes).
-     */
+    // ----------------------------------------------------------------------
+    // loadReviews - one JSON object per line
+    // ----------------------------------------------------------------------
     @Override
     public void loadReviews(String pathReviewsFile) throws Exception {
         System.out.println("Loading reviews from file (one JSON object per line): " + pathReviewsFile);
@@ -267,7 +273,6 @@ public class HW2StudentAnswer implements HW2API {
         try (BufferedReader br = Files.newBufferedReader(Paths.get(pathReviewsFile))) {
             String line;
             while ((line = br.readLine()) != null) {
-                // create a final variable for use in the lambda
                 final String currentLine = line.trim();
                 if (currentLine.isEmpty()) {
                     continue;
@@ -280,18 +285,19 @@ public class HW2StudentAnswer implements HW2API {
                             new TypeReference<Map<String, Object>>() {}
                         );
 
-                        String asin         = getStringValue(reviewMap, "asin",         NOT_AVAILABLE_VALUE);
-                        String reviewerId   = getStringValue(reviewMap, "reviewerId",   NOT_AVAILABLE_VALUE);
-                        String reviewerName = getStringValue(reviewMap, "reviewerName", NOT_AVAILABLE_VALUE);
+                        // The JSON uses "reviewerID" not "reviewerId"
+                        String reviewerId = getStringValue(reviewMap, "reviewerID", NOT_AVAILABLE_VALUE);
 
-                        // rating is an int; if missing, set -1
+                        // "overall" is the star rating in the data
                         int rating = -1;
-                        if (reviewMap.containsKey("rating") && reviewMap.get("rating") != null) {
-                            rating = ((Number) reviewMap.get("rating")).intValue();
+                        if (reviewMap.containsKey("overall") && reviewMap.get("overall") != null) {
+                            rating = ((Number) reviewMap.get("overall")).intValue();
                         }
 
-                        String summary    = getStringValue(reviewMap, "summary",    NOT_AVAILABLE_VALUE);
-                        String reviewText = getStringValue(reviewMap, "reviewText", NOT_AVAILABLE_VALUE);
+                        String asin         = getStringValue(reviewMap, "asin",         NOT_AVAILABLE_VALUE);
+                        String reviewerName = getStringValue(reviewMap, "reviewerName", NOT_AVAILABLE_VALUE);
+                        String summary      = getStringValue(reviewMap, "summary",      NOT_AVAILABLE_VALUE);
+                        String reviewText   = getStringValue(reviewMap, "reviewText",   NOT_AVAILABLE_VALUE);
 
                         // Handle time from 'unixReviewTime'
                         long unixTime = 0L;
@@ -300,7 +306,7 @@ public class HW2StudentAnswer implements HW2API {
                         }
                         Instant time = Instant.ofEpochSecond(unixTime);
 
-                        // Insert into both tables via BATCH
+                        // BATCH insert into both tables
                         BoundStatement boundStmt = pstmtAddReviewBatch.bind(
                             // reviews_by_id
                             reviewerId, time, asin, reviewerName, rating, summary, reviewText,
@@ -324,7 +330,9 @@ public class HW2StudentAnswer implements HW2API {
         System.out.println("Successfully loaded " + count.get() + " reviews into Cassandra.");
     }
 
-
+    // ----------------------------------------------------------------------
+    // item(...) - returns the item data or "not exists" if not found
+    // ----------------------------------------------------------------------
     @Override
     public String item(String asin) {
         System.out.println("[INFO] Fetching item for asin = " + asin);
@@ -346,12 +354,14 @@ public class HW2StudentAnswer implements HW2API {
         return formatItem(dbAsin, dbTitle, dbImage, dbCats, dbDesc);
     }
 
+    // ----------------------------------------------------------------------
+    // userReviews(...) - returns reviews by user in desc time order
+    // ----------------------------------------------------------------------
     @Override
     public Iterable<String> userReviews(String reviewerID) {
         System.out.println("[INFO] Fetching userReviews for reviewerID = " + reviewerID);
 
         ArrayList<String> reviews = new ArrayList<>();
-
         ResultSet rs = session.execute(pstmtSelectReviewById.bind(reviewerID));
 
         for (Row row : rs) {
@@ -363,7 +373,6 @@ public class HW2StudentAnswer implements HW2API {
             String summary    = row.getString("summary");
             String reviewText = row.getString("reviewText");
 
-            // format using formatReview(...)
             String reviewStr = formatReview(time, asin, reviewerId, name, rating, summary, reviewText);
             reviews.add(reviewStr);
         }
@@ -372,12 +381,14 @@ public class HW2StudentAnswer implements HW2API {
         return reviews;
     }
 
+    // ----------------------------------------------------------------------
+    // itemReviews(...) - returns reviews by item in desc time order
+    // ----------------------------------------------------------------------
     @Override
     public Iterable<String> itemReviews(String asin) {
         System.out.println("[INFO] Fetching itemReviews for asin = " + asin);
 
         ArrayList<String> reviews = new ArrayList<>();
-
         ResultSet rs = session.execute(pstmtSelectReviewByItem.bind(asin));
 
         for (Row row : rs) {
@@ -397,10 +408,13 @@ public class HW2StudentAnswer implements HW2API {
         return reviews;
     }
 
-    // -------------------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
     // Utility / Helper Methods
-    // -------------------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
 
+    /**
+     * Safely returns a string from map. If key is missing or null, returns defaultVal.
+     */
     private String getStringValue(Map<String, Object> map, String key, String defaultVal) {
         if (!map.containsKey(key) || map.get(key) == null) {
             return defaultVal;
@@ -408,9 +422,9 @@ public class HW2StudentAnswer implements HW2API {
         return map.get(key).toString();
     }
 
-    // -------------------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
     // Provided formatting methods - do not change
-    // -------------------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
     private String formatItem(String asin, String title, String imageUrl, Set<String> categories, String description) {
         String itemDesc = "";
         itemDesc += "asin: " + asin + "\n";
@@ -430,7 +444,7 @@ public class HW2StudentAnswer implements HW2API {
             String summary,
             String reviewText) {
 
-        String reviewDesc =
+        return
             "time: " + time +
             ", asin: " + asin +
             ", reviewerID: " + reviewerId +
@@ -438,6 +452,5 @@ public class HW2StudentAnswer implements HW2API {
             ", rating: " + rating +
             ", summary: " + summary +
             ", reviewText: " + reviewText + "\n";
-        return reviewDesc;
     }
 }
